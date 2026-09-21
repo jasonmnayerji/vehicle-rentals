@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Book a car</h1>
+
+  <section class="card">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.idempotency_key }}
+
+      {% for error in form.non_field_errors %}
+        <div class="note error" role="alert">{{ error }}</div>
+      {% endfor %}
+      {% if available is not None %}
+        <div class="note {% if available %}success{% else %}error{% endif %}" role="status">
+          {% if available %}
+            {{ available }} car{{ available|pluralize }} free for that whole period.
+          {% else %}
+            No cars of that type are free for that whole period.
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="grid">
+        {% for field in form.visible_fields %}
+          <div class="field">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {{ field.errors }}
+          </div>
+        {% endfor %}
+      </div>
+      <p class="hint">Times are in {{ time_zone }}.</p>
+
+      <div class="actions">
+        <button type="submit" name="action" value="book">Book</button>
+        <button class="secondary" type="submit" name="action" value="check">Check availability</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Your reservations</h2>
+    {% if reservations %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Car</th><th>Pick-up</th><th>Return</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for reservation in reservations %}
+              <tr>
+                <td>{{ reservation.car_type.label }}</td>
+                <td>{{ reservation.period.start|date:"D j M Y, H:i" }}</td>
+                <td>{{ reservation.period.end|date:"D j M Y, H:i" }}</td>
+                <td>
+                  {% if reservation.is_cancelled %}
+                    <span class="pill cancelled">Cancelled</span>
+                  {% elif reservation.period.end <= now %}
+                    <span class="pill ended">Ended</span>
+                  {% else %}
+                    <span class="pill active">Active</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if not reservation.is_cancelled and reservation.period.end > now %}
+                    <form class="inline" method="post"
+                          action="{% url 'cancel-reservation' reservation.id %}">
+                      {% csrf_token %}
+                      <button class="danger" type="submit">Cancel</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">You have no reservations yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

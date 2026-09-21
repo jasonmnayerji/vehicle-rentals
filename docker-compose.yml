@@ -1,0 +1,105 @@
+name: vehicle-rentals
+
+x-app-env: &app-env
+  DJANGO_ENV: ${DJANGO_ENV:-production}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?copy .env.example to .env first}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+  DJANGO_TIME_ZONE: ${DJANGO_TIME_ZONE:-UTC}
+  DJANGO_BEHIND_TLS: ${DJANGO_BEHIND_TLS:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env first}
+  POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env first}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env first}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  POSTGRES_LOCK_TIMEOUT_MS: ${POSTGRES_LOCK_TIMEOUT_MS:-5000}
+  POSTGRES_STATEMENT_TIMEOUT_MS: ${POSTGRES_STATEMENT_TIMEOUT_MS:-15000}
+
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  db:
+    image: postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env first}
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env first}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Loopback only, so a local client (psql, a GUI) can connect but nothing else on the
+    # network can. Local convenience: a real deploy would publish no database port at all.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  # One-shot. Migrations run once, before any web process starts, rather than racing each
+  # other from several web containers.
+  migrate:
+    build:
+      context: .
+      target: runtime
+    # seed_demo only adds the demo car types when they are missing, so the UI is usable on
+    # first start. This compose file is for local use; a real deploy would not seed.
+    # create_dev_superuser does nothing unless DJANGO_ENV=dev.
+    command:
+      - sh
+      - -c
+      - >-
+        python manage.py migrate --noinput
+        && python manage.py seed_demo
+        && python manage.py create_dev_superuser --if-dev
+    environment:
+      <<: *app-env
+      # Only the one-shot job sees these. The web process has no use for the password.
+      DEV_SUPERUSER_USERNAME: ${DEV_SUPERUSER_USERNAME:-admin}
+      DEV_SUPERUSER_PASSWORD: ${DEV_SUPERUSER_PASSWORD:-}
+      # A migration may legitimately run for longer than any web request is allowed to.
+      POSTGRES_STATEMENT_TIMEOUT_MS: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+    <<: *hardening
+
+  web:
+    build:
+      context: .
+      target: runtime
+    environment: *app-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    <<: *hardening
+
+  # docker compose --profile test run --rm tests
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:

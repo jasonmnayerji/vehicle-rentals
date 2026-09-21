@@ -1,0 +1,68 @@
+[project]
+name = "vehicle-rentals"
+version = "0.1.0"
+description = "Simulated car rental system: reservations by car type with safe concurrent booking."
+requires-python = ">=3.13"
+dependencies = [
+    "django>=5.2,<5.3",
+    "gunicorn>=23",
+    "psycopg[binary]>=3.2,<4",
+    "whitenoise>=6.9,<7",
+]
+
+# Tools for working on the code. Never installed in the deployed image.
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8",
+    "pytest-django>=4.9",
+    "ruff>=0.9",
+]
+
+[tool.uv]
+# A deployed service, not a library: there is nothing to build or install, only
+# dependencies to lock. The ranges above say what is acceptable; uv.lock records the exact
+# versions and hashes that are installed everywhere (laptop, CI, image).
+package = false
+required-version = ">=0.9.15"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["tests"]
+# no:cacheprovider: the suite also runs in a container whose code directory is read-only.
+addopts = "-ra --strict-markers --strict-config -p no:cacheprovider"
+filterwarnings = [
+    "error",
+    # WhiteNoise warns when collectstatic has not been run, which is normal outside the image.
+    "ignore:No directory at:UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # import order
+    "B",            # bugbear: likely bugs
+    "UP",           # modern syntax
+    "S",            # bandit security checks
+    "DJ",           # Django-specific
+    "PT",           # pytest style
+    "SIM", "C4", "RET", "RUF",
+]
+ignore = [
+    "RUF012",  # Django Meta/admin class attributes are idiomatically plain lists
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # asserts and fixture passwords are what tests are made of
+
+# Strict typing is enforced where the business rules live. The domain package is plain
+# Python, so it can be checked strictly with no Django plugin and no stubs.
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["rentals/domain"]

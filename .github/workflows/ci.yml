@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Actions are pinned to a commit, not a tag: a tag can be moved to different code, and these
+# run with access to the repository. The comment records which release the commit is.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The brief: "use unit tests to prove the system satisfies the requirements". Run the way a
+  # reviewer with no Docker would: no database, no settings, no environment, and no Django
+  # installed at all, only pytest. If the domain ever starts importing the framework, or a
+  # unit test starts needing configuration, this job is what notices.
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          version: "0.9.15"
+      - name: Unit tests with nothing installed but pytest
+        run: |
+          pytest_pin=$(uv export --locked --all-groups --no-emit-project --no-hashes --quiet | grep -E '^pytest==')
+          uv run --no-project --isolated --with "$pytest_pin" --with tzdata             pytest -c tests/unit/pytest.ini tests/unit
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        # The same digest as docker-compose.yml, so CI tests against the database that ships.
+        image: postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
+        env:
+          POSTGRES_DB: vehicle_rentals
+          POSTGRES_USER: vehicle_rentals
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vehicle_rentals"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-not-a-secret
+      POSTGRES_DB: vehicle_rentals
+      POSTGRES_USER: vehicle_rentals
+      POSTGRES_PASSWORD: ci-only
+      POSTGRES_HOST: localhost
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          version: "0.9.15"
+          enable-cache: true
+      # --locked fails the build if uv.lock no longer matches pyproject.toml, so a dependency
+      # cannot change without the lockfile changing in the same commit.
+      - name: Install dependencies from the lockfile
+        run: uv sync --locked
+      - name: Lint
+        run: uv run --no-sync ruff check . && uv run --no-sync ruff format --check .
+      - name: Type-check the domain
+        run: uv run --no-sync mypy
+      - name: Migrations are up to date
+        run: uv run --no-sync python manage.py makemigrations --check --dry-run
+      - name: Test
+        run: uv run --no-sync pytest
+
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          version: "0.9.15"
+      # The lockfile is exported exactly as locked (pinned and hashed) and audited as written,
+      # with no resolver run. Dev tools are included: they run with access to the source.
+      # A known-vulnerable dependency fails the build.
+      - name: Audit dependencies for known vulnerabilities
+        run: |
+          uv export --locked --all-groups --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/locked.txt" --quiet
+          uvx pip-audit==2.10.1 --require-hashes --disable-pip -r "$RUNNER_TEMP/locked.txt"
+
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build the runtime image
+        run: docker build --target runtime -t vehicle-rentals:ci .
+      # The exact commands the README gives a reviewer, so the documented path cannot rot:
+      # the test job above never touches the Dockerfile's test stage or the compose file.
+      - name: Run the documented test command
+        run: |
+          cp .env.example .env
+          docker compose --profile test run --rm tests
+      - name: Start the stack and wait for it to report healthy
+        run: docker compose up --detach --wait --wait-timeout 120 web
+      - name: Show logs if anything failed
+        if: failure()
+        run: docker compose logs

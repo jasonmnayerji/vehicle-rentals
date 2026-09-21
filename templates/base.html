@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Vehicle rentals{% endblock %}</title>
+  {# Inline on purpose: no static pipeline, no third-party requests, works offline. #}
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --ink: #1b1f24; --muted: #5d6673; --line: #dfe3e8;
+      --accent: #1f5fbf; --ok: #176b3a; --ok-bg: #e5f4ea; --bad: #a3271f; --bad-bg: #fbe9e7;
+      --info: #274b7a; --info-bg: #e7eef8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171b; --card: #1c2026; --ink: #e7eaee; --muted: #9aa4b1; --line: #2d333b;
+        --accent: #6ea2f0; --ok: #7bd39b; --ok-bg: #173324; --bad: #f19a92; --bad-bg: #3a1c1a;
+        --info: #a9c6f2; --info-bg: #1a2a40;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink);
+           font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { background: var(--card); border-bottom: 1px solid var(--line); }
+    .bar, main { max-width: 56rem; margin: 0 auto; padding: 0 1rem; }
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+           min-height: 3.5rem; flex-wrap: wrap; }
+    .brand { font-weight: 650; color: var(--ink); text-decoration: none; }
+    .who { display: flex; align-items: center; gap: .75rem; color: var(--muted); font-size: .9rem; }
+    main { padding-top: 1.5rem; padding-bottom: 3rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+    h2 { font-size: 1.05rem; margin: 0 0 .75rem; }
+    a { color: var(--accent); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: .6rem;
+            padding: 1.25rem; margin-bottom: 1.25rem; }
+    .narrow { max-width: 26rem; margin-left: auto; margin-right: auto; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+    label { display: block; font-size: .85rem; font-weight: 600; margin-bottom: .3rem; }
+    input, select { width: 100%; padding: .55rem .6rem; font: inherit; color: var(--ink);
+                    background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; }
+    input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .field { margin-bottom: .9rem; }
+    .help, .hint { color: var(--muted); font-size: .8rem; }
+    .hint { margin: .25rem 0 1rem; }
+    .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .25rem; }
+    button { font: inherit; font-weight: 600; padding: .55rem 1rem; border-radius: .4rem;
+             border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--accent); }
+    button.danger { background: transparent; color: var(--bad); border-color: var(--bad);
+                    padding: .3rem .7rem; font-size: .85rem; }
+    button.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 500; }
+    .note { padding: .7rem .9rem; border-radius: .4rem; margin-bottom: 1rem; font-size: .95rem; }
+    .note.success { background: var(--ok-bg); color: var(--ok); }
+    .note.error, .note.warning { background: var(--bad-bg); color: var(--bad); }
+    .note.info { background: var(--info-bg); color: var(--info); }
+    ul.errorlist { list-style: none; margin: .3rem 0 0; padding: 0; color: var(--bad); font-size: .85rem; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { text-align: left; padding: .6rem .5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    .pill { display: inline-block; padding: .1rem .55rem; border-radius: 1rem; font-size: .78rem; font-weight: 600; }
+    .pill.active { background: var(--ok-bg); color: var(--ok); }
+    .pill.cancelled, .pill.ended { background: var(--line); color: var(--muted); }
+    .empty { color: var(--muted); margin: 0; }
+    form.inline { display: inline; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a class="brand" href="{% url 'dashboard' %}">Vehicle rentals</a>
+      {% if user.is_authenticated %}
+        <div class="who">
+          <span>{{ user.get_full_name|default:user.get_username }}</span>
+          {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+          <form class="inline" method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button class="link" type="submit">Log out</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    {% for message in messages %}
+      <div class="note {{ message.level_tag }}" role="status">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
